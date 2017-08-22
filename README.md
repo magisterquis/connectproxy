@@ -2,6 +2,7 @@ ConnectProxy
 ============
 Small Go library to use CONNECT-speaking proxies standalone or with the
 [proxy](golang.org/x/net/proxy/) library.
+[![GoDoc](https://godoc.org/github.com/magisterquis/connectproxy?status.svg)](https://godoc.org/github.com/magisterquis/connectproxy)
 
 Please see the godoc for more details.
 
