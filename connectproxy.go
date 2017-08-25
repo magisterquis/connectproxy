@@ -216,7 +216,7 @@ func GeneratorWithConfig(config *Config) func(*url.URL, proxy.Dialer) (proxy.Dia
 }
 
 // Dial connects to the given address via the server.
-func (cd *connectDialer) Dial(network, addr string) (c net.Conn, err error) {
+func (cd *connectDialer) Dial(network, addr string) (net.Conn, error) {
 	/* Connect to proxy server */
 	nc, err := cd.forward.Dial("tcp", cd.u.Host)
 	if nil != err {
@@ -236,13 +236,13 @@ func (cd *connectDialer) Dial(network, addr string) (c net.Conn, err error) {
 	// HACK. http.ReadRequest also does this.
 	reqURL, err := url.Parse("http://" + addr)
 	if err != nil {
-		c.Close()
+		nc.Close()
 		return nil, err
 	}
 	reqURL.Scheme = ""
 	req, err := http.NewRequest("CONNECT", reqURL.String(), nil)
 	if err != nil {
-		c.Close()
+		nc.Close()
 		return nil, err
 	}
 	req.Close = false
@@ -250,9 +250,9 @@ func (cd *connectDialer) Dial(network, addr string) (c net.Conn, err error) {
 		req.SetBasicAuth(cd.username, cd.password)
 	}
 	/* Send the request */
-	err = req.Write(c)
+	err = req.Write(nc)
 	if err != nil {
-		c.Close()
+		nc.Close()
 		return nil, err
 	}
 
@@ -262,19 +262,24 @@ func (cd *connectDialer) Dial(network, addr string) (c net.Conn, err error) {
 		connected = make(chan string)
 		to        = cd.config.DialTimeout
 	)
-	go func() {
-		select {
-		case <-time.After(to):
-			connTOd = true
-			c.Close()
-		case <-connected:
-		}
-	}()
+	if 0 != to {
+		go func() {
+			select {
+			case <-time.After(to):
+				connTOd = true
+				nc.Close()
+			case <-connected:
+			}
+		}()
+	}
 	/* Wait for a response */
-	resp, err := http.ReadResponse(bufio.NewReader(c), req)
-	resp.Body.Close()
+	resp, err := http.ReadResponse(bufio.NewReader(nc), req)
+	close(connected)
+	if nil != resp {
+		resp.Body.Close()
+	}
 	if err != nil {
-		c.Close()
+		nc.Close()
 		if connTOd {
 			return nil, ErrorConnectionTimeout(fmt.Errorf(
 				"connectproxy: no connection to %q after %v",
@@ -286,11 +291,11 @@ func (cd *connectDialer) Dial(network, addr string) (c net.Conn, err error) {
 	}
 	/* Make sure we can proceed */
 	if resp.StatusCode != http.StatusOK {
-		c.Close()
+		nc.Close()
 		return nil, fmt.Errorf(
 			"connectproxy: non-OK status: %v",
 			resp.Status,
 		)
 	}
-	return c, nil
+	return nc, nil
 }
