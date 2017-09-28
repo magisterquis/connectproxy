@@ -144,7 +144,6 @@ func RegisterDialerFromURL(registerHTTP, registerHTTPS bool) {
 type connectDialer struct {
 	u       *url.URL
 	forward proxy.Dialer
-	header  http.Header
 	config  *Config
 
 	/* Auth from the url.  Avoids a function call */
@@ -249,6 +248,8 @@ func (cd *connectDialer) Dial(network, addr string) (net.Conn, error) {
 	if cd.haveAuth {
 		req.SetBasicAuth(cd.username, cd.password)
 	}
+	req.Header = cd.config.Header
+
 	/* Send the request */
 	err = req.Write(nc)
 	if err != nil {
