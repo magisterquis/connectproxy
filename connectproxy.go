@@ -79,6 +79,7 @@ package connectproxy
 import (
 	"bufio"
 	"crypto/tls"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"net"
@@ -246,7 +247,7 @@ func (cd *connectDialer) Dial(network, addr string) (net.Conn, error) {
 	}
 	req.Close = false
 	if cd.haveAuth {
-		req.SetBasicAuth(cd.username, cd.password)
+		req.Header.Set("Proxy-Authorization", basicAuth(cd.username, cd.password))
 	}
 	req.Header = cd.config.Header
 
@@ -299,4 +300,9 @@ func (cd *connectDialer) Dial(network, addr string) (net.Conn, error) {
 		)
 	}
 	return nc, nil
+}
+
+func basicAuth(username, password string) string {
+	auth := username + ":" + password
+	return base64.StdEncoding.EncodeToString([]byte(auth))
 }
