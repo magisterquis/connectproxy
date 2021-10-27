@@ -204,6 +204,15 @@ func GeneratorWithConfig(config *Config) func(*url.URL, proxy.ContextDialer) (pr
 
 // Dial connects to the given address via the server.
 func (cd *connectDialer) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	if cd.config.DialTimeout != 0 {
+		deadline := time.Now().Add(cd.config.DialTimeout)
+		if d, ok := ctx.Deadline(); !ok || deadline.Before(d) {
+			subCtx, cancel := context.WithDeadline(ctx, deadline)
+			defer cancel()
+			ctx = subCtx
+		}
+	}
+
 	/* Connect to proxy server */
 	nc, err := cd.forward.Dial("tcp", cd.u.Host)
 	if nil != err {
