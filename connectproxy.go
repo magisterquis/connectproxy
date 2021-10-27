@@ -78,6 +78,7 @@ package connectproxy
 
 import (
 	"bufio"
+	"context"
 	"crypto/tls"
 	"errors"
 	"fmt"
@@ -130,7 +131,7 @@ type Config struct {
 // CONNECT verb.  It implements the proxy.Dialer interface.
 type connectDialer struct {
 	u       *url.URL
-	forward proxy.Dialer
+	forward proxy.ContextDialer
 	config  *Config
 
 	/* Auth from the url.  Avoids a function call */
@@ -139,16 +140,16 @@ type connectDialer struct {
 	password string
 }
 
-// New returns a proxy.Dialer given a URL specification and an underlying
+// New returns a proxy.ContextDialer given a URL specification and an underlying
 // proxy.Dialer for it to make network requests.  New may be passed to
 // proxy.RegisterDialerType for the schemes "http" and "https".  The
 // convenience function RegisterDialerFromURL simplifies this.
-func New(u *url.URL, forward proxy.Dialer) (proxy.Dialer, error) {
+func New(u *url.URL, forward proxy.ContextDialer) (proxy.ContextDialer, error) {
 	return NewWithConfig(u, forward, nil)
 }
 
 // NewWithConfig is like New, but allows control over various options.
-func NewWithConfig(u *url.URL, forward proxy.Dialer, config *Config) (proxy.Dialer, error) {
+func NewWithConfig(u *url.URL, forward proxy.ContextDialer, config *Config) (proxy.ContextDialer, error) {
 	/* Make sure we have an allowable scheme */
 	if "http" != u.Scheme && "https" != u.Scheme {
 		return nil, ErrorUnsupportedScheme(errors.New(
@@ -195,14 +196,14 @@ func NewWithConfig(u *url.URL, forward proxy.Dialer, config *Config) (proxy.Dial
 //     proxy.RegisterDialerType("https", connectproxy.GeneratorWithConfig(
 //             &connectproxy.Config{DialTimeout: 5 * time.Minute},
 //     ))
-func GeneratorWithConfig(config *Config) func(*url.URL, proxy.Dialer) (proxy.Dialer, error) {
-	return func(u *url.URL, forward proxy.Dialer) (proxy.Dialer, error) {
+func GeneratorWithConfig(config *Config) func(*url.URL, proxy.ContextDialer) (proxy.ContextDialer, error) {
+	return func(u *url.URL, forward proxy.ContextDialer) (proxy.ContextDialer, error) {
 		return NewWithConfig(u, forward, config)
 	}
 }
 
 // Dial connects to the given address via the server.
-func (cd *connectDialer) Dial(network, addr string) (net.Conn, error) {
+func (cd *connectDialer) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
 	/* Connect to proxy server */
 	nc, err := cd.forward.Dial("tcp", cd.u.Host)
 	if nil != err {
