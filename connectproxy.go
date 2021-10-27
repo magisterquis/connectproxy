@@ -87,8 +87,8 @@ import (
 	"net/url"
 	"time"
 
-	"golang.org/x/net/proxy"
 	"encoding/base64"
+	"golang.org/x/net/proxy"
 )
 
 func init() {
@@ -234,12 +234,12 @@ func (cd *connectDialer) DialContext(ctx context.Context, network, addr string) 
 	}
 	req.Close = false
 
-	if (len(cd.config.Header) > 0) {
+	if len(cd.config.Header) > 0 {
 		req.Header = cd.config.Header
 	}
 
 	if cd.haveAuth {
-		basicAuth := "Basic " + base64.StdEncoding.EncodeToString([]byte(cd.username + ":" + cd.password))	
+		basicAuth := "Basic " + base64.StdEncoding.EncodeToString([]byte(cd.username+":"+cd.password))
 		req.Header.Add("Proxy-Authorization", basicAuth)
 	}
 
