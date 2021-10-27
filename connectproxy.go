@@ -214,7 +214,7 @@ func (cd *connectDialer) DialContext(ctx context.Context, network, addr string) 
 	}
 
 	/* Connect to proxy server */
-	nc, err := cd.forward.Dial("tcp", cd.u.Host)
+	nc, err := cd.forward.DialContext(ctx, "tcp", cd.u.Host)
 	if nil != err {
 		return nil, err
 	}
