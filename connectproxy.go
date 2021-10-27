@@ -126,20 +126,6 @@ type Config struct {
 	DialTimeout time.Duration
 }
 
-// RegisterDialerFromURL is a convenience wrapper around
-// proxy.RegisterDialerType, which registers the given URL as a for the schemes
-// "http" and/or "https", as controlled by registerHTTP and registerHTTPS.  If
-// both registerHTTP and registerHTTPS are false, RegisterDialerFromURL is a
-// no-op.
-func RegisterDialerFromURL(registerHTTP, registerHTTPS bool) {
-	if registerHTTP {
-		proxy.RegisterDialerType("http", New)
-	}
-	if registerHTTPS {
-		proxy.RegisterDialerType("https", New)
-	}
-}
-
 // connectDialer makes connections via an HTTP(s) server supporting the
 // CONNECT verb.  It implements the proxy.Dialer interface.
 type connectDialer struct {
