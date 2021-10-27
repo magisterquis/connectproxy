@@ -259,22 +259,20 @@ func (cd *connectDialer) DialContext(ctx context.Context, network, addr string) 
 		return nil, err
 	}
 
-	/* Timer to terminate long reads */
+	/* Handle context cancellation for long reads */
 	var (
-		connTOd   = false
+		canceled  = false
 		connected = make(chan string)
-		to        = cd.config.DialTimeout
 	)
-	if 0 != to {
-		go func() {
-			select {
-			case <-time.After(to):
-				connTOd = true
-				nc.Close()
-			case <-connected:
-			}
-		}()
-	}
+	go func() {
+		select {
+		case <-ctx.Done():
+			canceled = true
+			nc.Close()
+		case <-connected:
+		}
+	}()
+
 	/* Wait for a response */
 	resp, err := http.ReadResponse(bufio.NewReader(nc), req)
 	close(connected)
@@ -283,12 +281,8 @@ func (cd *connectDialer) DialContext(ctx context.Context, network, addr string) 
 	}
 	if err != nil {
 		nc.Close()
-		if connTOd {
-			return nil, ErrorConnectionTimeout(fmt.Errorf(
-				"connectproxy: no connection to %q after %v",
-				reqURL,
-				to,
-			))
+		if canceled {
+			return nil, ErrorConnectionTimeout(fmt.Errorf("connectproxy: no connection to %q after context cancelation: %w", reqURL, ctx.Err()))
 		}
 		return nil, err
 	}
