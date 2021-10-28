@@ -78,6 +78,7 @@ package connectproxy
 
 import (
 	"bufio"
+	"context"
 	"crypto/tls"
 	"errors"
 	"fmt"
@@ -86,8 +87,8 @@ import (
 	"net/url"
 	"time"
 
-	"golang.org/x/net/proxy"
 	"encoding/base64"
+	"golang.org/x/net/proxy"
 )
 
 func init() {
@@ -126,25 +127,11 @@ type Config struct {
 	DialTimeout time.Duration
 }
 
-// RegisterDialerFromURL is a convenience wrapper around
-// proxy.RegisterDialerType, which registers the given URL as a for the schemes
-// "http" and/or "https", as controlled by registerHTTP and registerHTTPS.  If
-// both registerHTTP and registerHTTPS are false, RegisterDialerFromURL is a
-// no-op.
-func RegisterDialerFromURL(registerHTTP, registerHTTPS bool) {
-	if registerHTTP {
-		proxy.RegisterDialerType("http", New)
-	}
-	if registerHTTPS {
-		proxy.RegisterDialerType("https", New)
-	}
-}
-
 // connectDialer makes connections via an HTTP(s) server supporting the
 // CONNECT verb.  It implements the proxy.Dialer interface.
 type connectDialer struct {
 	u       *url.URL
-	forward proxy.Dialer
+	forward proxy.ContextDialer
 	config  *Config
 
 	/* Auth from the url.  Avoids a function call */
@@ -153,16 +140,16 @@ type connectDialer struct {
 	password string
 }
 
-// New returns a proxy.Dialer given a URL specification and an underlying
+// New returns a proxy.ContextDialer given a URL specification and an underlying
 // proxy.Dialer for it to make network requests.  New may be passed to
 // proxy.RegisterDialerType for the schemes "http" and "https".  The
 // convenience function RegisterDialerFromURL simplifies this.
-func New(u *url.URL, forward proxy.Dialer) (proxy.Dialer, error) {
+func New(u *url.URL, forward proxy.ContextDialer) (proxy.ContextDialer, error) {
 	return NewWithConfig(u, forward, nil)
 }
 
 // NewWithConfig is like New, but allows control over various options.
-func NewWithConfig(u *url.URL, forward proxy.Dialer, config *Config) (proxy.Dialer, error) {
+func NewWithConfig(u *url.URL, forward proxy.ContextDialer, config *Config) (proxy.ContextDialer, error) {
 	/* Make sure we have an allowable scheme */
 	if "http" != u.Scheme && "https" != u.Scheme {
 		return nil, ErrorUnsupportedScheme(errors.New(
@@ -209,16 +196,25 @@ func NewWithConfig(u *url.URL, forward proxy.Dialer, config *Config) (proxy.Dial
 //     proxy.RegisterDialerType("https", connectproxy.GeneratorWithConfig(
 //             &connectproxy.Config{DialTimeout: 5 * time.Minute},
 //     ))
-func GeneratorWithConfig(config *Config) func(*url.URL, proxy.Dialer) (proxy.Dialer, error) {
-	return func(u *url.URL, forward proxy.Dialer) (proxy.Dialer, error) {
+func GeneratorWithConfig(config *Config) func(*url.URL, proxy.ContextDialer) (proxy.ContextDialer, error) {
+	return func(u *url.URL, forward proxy.ContextDialer) (proxy.ContextDialer, error) {
 		return NewWithConfig(u, forward, config)
 	}
 }
 
 // Dial connects to the given address via the server.
-func (cd *connectDialer) Dial(network, addr string) (net.Conn, error) {
+func (cd *connectDialer) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	if cd.config.DialTimeout != 0 {
+		deadline := time.Now().Add(cd.config.DialTimeout)
+		if d, ok := ctx.Deadline(); !ok || deadline.Before(d) {
+			subCtx, cancel := context.WithDeadline(ctx, deadline)
+			defer cancel()
+			ctx = subCtx
+		}
+	}
+
 	/* Connect to proxy server */
-	nc, err := cd.forward.Dial("tcp", cd.u.Host)
+	nc, err := cd.forward.DialContext(ctx, "tcp", cd.u.Host)
 	if nil != err {
 		return nil, err
 	}
@@ -247,12 +243,12 @@ func (cd *connectDialer) Dial(network, addr string) (net.Conn, error) {
 	}
 	req.Close = false
 
-	if (len(cd.config.Header) > 0) {
+	if len(cd.config.Header) > 0 {
 		req.Header = cd.config.Header
 	}
 
 	if cd.haveAuth {
-		basicAuth := "Basic " + base64.StdEncoding.EncodeToString([]byte(cd.username + ":" + cd.password))	
+		basicAuth := "Basic " + base64.StdEncoding.EncodeToString([]byte(cd.username+":"+cd.password))
 		req.Header.Add("Proxy-Authorization", basicAuth)
 	}
 
@@ -263,22 +259,20 @@ func (cd *connectDialer) Dial(network, addr string) (net.Conn, error) {
 		return nil, err
 	}
 
-	/* Timer to terminate long reads */
+	/* Handle context cancellation for long reads */
 	var (
-		connTOd   = false
+		canceled  = false
 		connected = make(chan string)
-		to        = cd.config.DialTimeout
 	)
-	if 0 != to {
-		go func() {
-			select {
-			case <-time.After(to):
-				connTOd = true
-				nc.Close()
-			case <-connected:
-			}
-		}()
-	}
+	go func() {
+		select {
+		case <-ctx.Done():
+			canceled = true
+			nc.Close()
+		case <-connected:
+		}
+	}()
+
 	/* Wait for a response */
 	resp, err := http.ReadResponse(bufio.NewReader(nc), req)
 	close(connected)
@@ -287,12 +281,8 @@ func (cd *connectDialer) Dial(network, addr string) (net.Conn, error) {
 	}
 	if err != nil {
 		nc.Close()
-		if connTOd {
-			return nil, ErrorConnectionTimeout(fmt.Errorf(
-				"connectproxy: no connection to %q after %v",
-				reqURL,
-				to,
-			))
+		if canceled {
+			return nil, ErrorConnectionTimeout(fmt.Errorf("connectproxy: no connection to %q after context cancelation: %w", reqURL, ctx.Err()))
 		}
 		return nil, err
 	}
